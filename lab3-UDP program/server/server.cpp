@@ -6,6 +6,7 @@
 #include <fstream>
 #include <vector>
 #include<time.h>
+#include <thread>
 
 using namespace std;
 const int MAXLEN = 509;
@@ -15,34 +16,33 @@ const unsigned char ACK = 0x01;
 const unsigned char NAK = 0x02;
 const unsigned char LAST = 0x08;
 const unsigned char NOTLAST = 0x18;
-const unsigned char SHAKE_1 = 0x03;
-const unsigned char SHAKE_2 = 0x04;
-const unsigned char SHAKE_3 = 0x05;
-const unsigned char WAVE_1 = 0x06;
-const unsigned char WAVE_2 = 0x07;
-const int TIMEOUT = 500;
-static int order = 0;
+const unsigned char FSHAKE = 0x03;
+const unsigned char SSHAKE = 0x04;
+const unsigned char TSHAKE = 0x05;
+const unsigned char FWAKE = 0x06;
+const unsigned char SWAKE = 0x07;
+const int MAX_WAIT_TIME = 500;
 
 SOCKET server;
 SOCKADDR_IN serverAddr,clientAddr;
 //计算校验和
-unsigned char sum(char *flag,int len){
+unsigned char checksum(char *package,int len){
 	if (len == 0){
 		return ~(0);
 	}
-    unsigned int ret = 0;
+    unsigned int sum = 0;
     int i = 0;
     while(len--){
-        ret += (unsigned char) flag[i++];
-        if(ret & 0xFF00){
-            ret &= 0x00FF;
-            ret++;
+        sum += (unsigned char) package[i++];
+        if(sum & 0xFF00){
+            sum &= 0x00FF;
+            sum++;
         } 
     }
-    return ~(ret&0x00FF);
+    return ~(sum&0x00FF);
 }
 
-void my_recv(char *message,int &len_recv){
+void ARQ_rev(char *pkt,int &len_recv){
 	char recv[MAXLEN + 4];
     int len_tmp = sizeof(clientAddr);
     static char last_order = -1;
@@ -52,16 +52,16 @@ void my_recv(char *message,int &len_recv){
             memset(recv,0,sizeof(recv));
             while (recvfrom(server, recv, MAXLEN + 4, 0, (sockaddr *) &clientAddr, &len_tmp) == SOCKET_ERROR);
             char send[3];
-            if (sum(recv, MAXLEN + 4) == 0) {
+            if (checksum(recv, MAXLEN + 4) == 0) {
                 send[1] = ACK;
                 send[2] = recv[2];
-                send[0] = sum(send + 1, 2);
+                send[0] = checksum(send + 1, 2);
                 sendto(server, send, 3, 0, (sockaddr *) &clientAddr, sizeof(clientAddr));
                 break;
             } else {
                 send[1] = NAK;
                 send[2] = recv[2];
-                send[0] = sum(send + 1, 2);
+                send[0] = checksum(send + 1, 2);
                 sendto(server, send, 3, 0, (sockaddr *) &clientAddr, sizeof(clientAddr));
                 cout << "NAK" << endl;
                 continue;
@@ -72,11 +72,11 @@ void my_recv(char *message,int &len_recv){
         last_order = recv[2];
         if (LAST == recv[1]) {
             for (int i = 4; i < recv[3] + 4; i++)
-                message[len_recv++] = recv[i];
+                pkt[len_recv++] = recv[i];
             break;
         } else {
             for (int i = 3; i < MAXLEN + 3; i++)
-                message[len_recv++] = recv[i];
+                pkt[len_recv++] = recv[i];
         }
     }
 }
@@ -114,19 +114,19 @@ int main(){
 		char recv[2];
 		int len_tmp = sizeof(clientAddr);
 		while (recvfrom(server, recv, 2, 0, (sockaddr *) &clientAddr, &len_tmp) == SOCKET_ERROR);
-		if(sum(recv,2)!=0 || recv[1] != SHAKE_1){
+		if(checksum(recv,2)!=0 || recv[1] != FSHAKE){
 			continue;
 		}
 		while(true){
-			recv[1] = SHAKE_2;
-			recv[0] = sum(recv + 1,1);
+			recv[1] = SSHAKE;
+			recv[0] = checksum(recv + 1,1);
 			sendto(server, recv, 2, 0, (sockaddr *) &clientAddr, sizeof(clientAddr));
             while (recvfrom(server, recv, 2, 0, (sockaddr *) &clientAddr, &len_tmp) == SOCKET_ERROR);
-            if (sum(recv, 2) == 0 && recv[1] == SHAKE_1)
+            if (checksum(recv, 2) == 0 && recv[1] == FSHAKE)
                 continue;
-            if (sum(recv, 2) == 0 && recv[1] == SHAKE_3)
+            if (checksum(recv, 2) == 0 && recv[1] == TSHAKE)
                 break;
-            if (sum(recv, 2) != 0 || recv[1] != SHAKE_3) {
+            if (checksum(recv, 2) != 0 || recv[1] != TSHAKE) {
                 printf("error");
                 return 0;
             }
@@ -139,7 +139,7 @@ int main(){
     while(true){
     // 接受文件名
 	int len = 0;
-	my_recv(buffer,len);
+	ARQ_rev(buffer,len);
 	buffer[len] = 0;
 	string file_name(buffer);
     if(!strcmp("exit",file_name.c_str())){
@@ -148,7 +148,7 @@ int main(){
     // 重置buffer
     memset(buffer,0,file_name.length());
     // 接受文件内容
-	my_recv(buffer,len);
+	ARQ_rev(buffer,len);
 	ofstream out(file_name.c_str(),ofstream::binary);
 	for(int i = 0;i<len;i++){
 		out<<buffer[i];
@@ -162,11 +162,11 @@ int main(){
 		char recv[2];
         int len_tmp = sizeof(clientAddr);
         while (recvfrom(server, recv, 2, 0, (sockaddr *) &clientAddr, &len_tmp) == SOCKET_ERROR);
-        if (sum(recv, 2) != 0 || recv[1] != (char)WAVE_1)
+        if (checksum(recv, 2) != 0 || recv[1] != (char)FWAKE)
             continue;
 
-        recv[1] = WAVE_2;
-        recv[0] = sum(recv + 1, 1);
+        recv[1] = SWAKE;
+        recv[0] = checksum(recv + 1, 1);
         sendto(server, recv, 2, 0, (sockaddr *) &clientAddr, sizeof(clientAddr));
         break;
     }
