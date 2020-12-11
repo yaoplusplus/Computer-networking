@@ -45,7 +45,7 @@ unsigned char checksum(char *package,int len){
 void ARQ_rev(char *pkt,int &len_recv){
 	char recv[MAXLEN + 4];
     int len_tmp = sizeof(clientAddr);
-    static char last_order = -1;//上一个包的序号
+    static char last_order = 0;//上一个包的序号
     
     len_recv = 0;
     while (true) {
@@ -75,8 +75,7 @@ void ARQ_rev(char *pkt,int &len_recv){
         last_order = recv[2];
         // 解包
         if (LAST == recv[1]) {
-            cout<<"最后一个包的长度: "<<int(recv[3])<<endl;
-            for (int i = 4; i < recv[3] + 4; i++)
+            for (int i = 4; i <strlen(recv); i++)
                 pkt[len_recv++] = recv[i];
             break;
         } else {
@@ -150,6 +149,7 @@ int main(){
     if(!strcmp("exit",file_name.c_str())){
         break;
     }
+    printf("收到文件: %s\n",file_name.c_str());
     // 重置buffer
     memset(buffer,0,file_name.length());
     // 接受文件内容
@@ -159,7 +159,7 @@ int main(){
 		out<<buffer[i];
 	}
 	out.close();
-    printf("收到文件: %s\n",file_name.c_str());
+    printf("接收完成: %s\n",file_name.c_str());
     // cout<<"file_name: "<<file_name<<endl;
     }
 

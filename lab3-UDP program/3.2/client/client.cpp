@@ -66,6 +66,7 @@ bool ARQ_send(char* pkt,int len,int serial_num,int last=0){
 		real_package = new char[len + 4];
 		real_package[1] = LAST;
 		real_package[2] = serial_num;
+
 		real_package[3] = len;
 		for(int i = 4;i<len+4;i++){
 			real_package[i] = pkt[i - 4];
@@ -102,7 +103,6 @@ bool sw_send(){
 	int serial_num = sw.slide_w[sw.nextseqnum].serial_num;
 	char *pkt =sw.slide_w[sw.nextseqnum].pkt;
 	int len = sw.slide_w[sw.nextseqnum].length;
-	cout<<"包内容的长度: "<<len<<endl;
 	if(!sw.slide_w[sw.nextseqnum].last_flag){
 		real_package = new char[len + 3];
 		real_package[1] = NOTLAST;
@@ -118,7 +118,6 @@ bool sw_send(){
 		real_package[1] = LAST;
 		real_package[2] = serial_num;
 		real_package[3] = len;
-		cout<<"real_package[3]: "<<real_package[3]<<endl;
 		for(int i = 4;i<len+4;i++){
 			real_package[i] = pkt[i - 4];
 		}
@@ -127,26 +126,9 @@ bool sw_send(){
 	}
 	//send package
 	while(sendto(client, real_package, tmp_len, 0, (sockaddr *) &serverAddr, sizeof(serverAddr))){
-		cout<<"成功发出包的长度:"<<real_package[3]<<endl;		
-		cout<<"成功发出包:"<<real_package[2]<<endl;
+		sw.nextseqnum++;
 		return true;
 	}
-	// while(true){
-	// 	sendto(client, real_package, tmp_len, 0, (sockaddr *) &serverAddr, sizeof(serverAddr));
-	// 	int begin = clock();
-	// 	char recv[3];
-	// 	int len_tmp = sizeof(serverAddr);
-	// 	int fail = 0;
-		
-	// 	while (recvfrom(client, recv, 3, 0, (sockaddr *) &serverAddr, &len_tmp) == SOCKET_ERROR){    
-	// 		if (clock() - begin > MAX_WAIT_TIME) {
-    //             fail = 1;
-    //             break;
-    //         }
-    //     }
-    //     if (fail == 0 && checksum(recv, 3) == 0 && recv[1] == ACK && recv[2] == (char)serial_num)
-    //         return true;
-	// }
 }
 
 void rev_check(){
@@ -166,7 +148,7 @@ void rev_check(){
 int main(){
 	WSADATA wsadata;
 	//package的序号
-	int serial_num = 0;
+	int serial_num = 1;
 	if(WSAStartup(MAKEWORD(2,2),&wsadata)){
 		printf("版本错误!");
 		return 0;
@@ -213,7 +195,7 @@ int main(){
 		}
 	}
 	printf("----------成功连接----------\n\n");
-	thread rev(rev_check);
+	// thread rev(rev_check);
 	// rev.join();
 	while(true){
 		// 输入欲发送文件名
@@ -236,11 +218,12 @@ int main(){
 			buffer[len++] = t;
 			t = in.get();
 		}
-		cout<<"文件长度: "<<len<<endl;
 		in.close();
 		printf("文件加载完\n");
 		// 发送文件名
-		ARQ_send((char *) (filename.c_str()),filename.length(),serial_num++,1);
+		// ARQ_send((char *) (filename.c_str()),filename.length(),serial_num++,1);
+		if(!ARQ_send((char *) (filename.c_str()),filename.length(),serial_num++,1))
+		printf("文件名发送失败!\n");
 		printf("文件名发送完\n");
 		// 发送文件
 		// 防止序列号溢出unsigne char
@@ -265,7 +248,6 @@ int main(){
 				int num = sw.sendbase;
 				sw.slide_w[num].pkt = buffer + i * MAXLEN;
 				sw.slide_w[num].length = len_package;
-				cout<<"当前包的长度: "<<len_package<<endl;
 				sw.slide_w[num].last_flag = last_flag;
 				sw.slide_w[num].serial_num = serial_num;
 				cout<<"完成发送缓存"<<endl;
