@@ -1,5 +1,8 @@
 {
     "files.associations": {
-        "system_error": "cpp"
+        "system_error": "cpp",
+        "iostream": "cpp",
+        "thread": "cpp",
+        "ostream": "cpp"
     }
 }

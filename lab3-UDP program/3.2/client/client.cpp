@@ -7,7 +7,8 @@
 #include <vector>
 #include <time.h>
 #include <thread>
-
+#include "window.h"
+#define WINDOW_LEN 10 //定义窗口长度 最大序号: sendbase+WINDOW_LEN-1
 using namespace std;
 const int MAXLEN = 509;
 char buffer[200000000];
@@ -22,8 +23,11 @@ const unsigned char FWAKE = 0x06;
 const unsigned char SWAKE = 0x07;
 const int MAX_WAIT_TIME = 500;
 
+
 SOCKET client;
+
 SOCKADDR_IN serverAddr,clientAddr;
+slide_window sw;
 //计算校验和
 unsigned char checksum(char *package,int len){
 	if (len == 0){
@@ -45,7 +49,7 @@ bool ARQ_send(char* pkt,int len,int serial_num,int last=0){
 	if(len > MAXLEN || (last == false && len != MAXLEN)){
 		return false;
 	}
-	char *real_package;//加入3位char:checksum,LAST_FLAG,num 实际发送的包
+	char *real_package;//加入3/4位char:checksum,LAST_FLAG,num(可选)
 	int tmp_len;
 	if(!last){//make package
 		real_package = new char[len + 3];
@@ -57,8 +61,8 @@ bool ARQ_send(char* pkt,int len,int serial_num,int last=0){
 		}
         real_package[0] = checksum(real_package + 1, len + 2);
         tmp_len = len + 3;
+		sw.slide_w[serial_num].pkt = real_package; //发送的包放进滑动窗
 	}else{
-		
 		real_package = new char[len + 4];
 		real_package[1] = LAST;
 		real_package[2] = serial_num;
@@ -68,6 +72,7 @@ bool ARQ_send(char* pkt,int len,int serial_num,int last=0){
 		}
 		real_package[0] = checksum(real_package + 1 ,len + 3);
 		tmp_len = len + 4;
+		sw.slide_w[serial_num].pkt = real_package; //发送的包放进滑动窗
 	}
 	//send package
 	while(true){
@@ -87,6 +92,13 @@ bool ARQ_send(char* pkt,int len,int serial_num,int last=0){
             return true;
 	}
 }
+
+void rev_check(){
+cout<<"\n----------接受ACK线程启动----------\n";
+char rev_ack[4];
+while(recvfrom());
+}
+
 
 int main(){
 	WSADATA wsadata;
@@ -138,7 +150,8 @@ int main(){
 		}
 	}
 	printf("----------成功连接----------\n\n");
-
+	thread rev(rev_check);
+	// rev.join();
 	while(true){
 		// 输入欲发送文件名
 		string filename;
@@ -166,7 +179,7 @@ int main(){
 		ARQ_send((char *) (filename.c_str()),filename.length(),serial_num++,1);
 		printf("文件名发送完\n");
 		// 发送文件
-		//TODO what do this mean ?
+		// 防止序列号溢出unsigne char
 		serial_num %= (1<<8);
 		int num = len / MAXLEN + (len % MAXLEN != 0);
 		for(int i = 0;i<num;i++){
@@ -181,6 +194,11 @@ int main(){
 				last_flag = 0;
 				len_package = MAXLEN;
 			}
+			//裁剪之后的包放入滑动窗口
+			sw.slide_w[serial_num].pkt = buffer + i * MAXLEN;
+			sw.slide_w[serial_num].length = len_package;
+			sw.slide_w[serial_num].last_flag = last_flag;
+
 			ARQ_send(buffer + i * MAXLEN,len_package,serial_num++,last_flag);
 			serial_num %= (1<<8); 
 	}

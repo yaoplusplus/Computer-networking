@@ -45,7 +45,7 @@ unsigned char checksum(char *package,int len){
 void ARQ_rev(char *pkt,int &len_recv){
 	char recv[MAXLEN + 4];
     int len_tmp = sizeof(clientAddr);
-    static char last_order = -1;
+    static char last_order = -1;//上一个包的序号
     len_recv = 0;
     while (true) {
         while (true) {
@@ -68,8 +68,11 @@ void ARQ_rev(char *pkt,int &len_recv){
             }
         }
         if (last_order == recv[2])
+        // 再次收到了上一个包 再次收包 所以会多次给客户端发一个同一个ack
             continue;
+        // 更新服务端收到包序号
         last_order = recv[2];
+        // 解包
         if (LAST == recv[1]) {
             for (int i = 4; i < recv[3] + 4; i++)
                 pkt[len_recv++] = recv[i];
