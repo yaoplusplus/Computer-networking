@@ -71,12 +71,17 @@ void ARQ_rev(char *pkt,int &len_recv){
             continue;
         last_order = recv[2];
         if (LAST == recv[1]) {
-            for (int i = 4; i < recv[3] + 4; i++)
+            cout<<"最后一个包的长度:"<<recv[3]<<endl;
+            for (int i = 4; i < recv[3] + 4; i++){
                 pkt[len_recv++] = recv[i];
+                cout<<"i: "<<i<<endl;
+                }
             break;
         } else {
-            for (int i = 3; i < MAXLEN + 3; i++)
+            for (int i = 3; i < MAXLEN + 3; i++){
                 pkt[len_recv++] = recv[i];
+                // cout<<"i: "<<i<<endl;
+                }
         }
     }
 }
@@ -149,6 +154,7 @@ int main(){
     memset(buffer,0,file_name.length());
     // 接受文件内容
 	ARQ_rev(buffer,len);
+    cout<<"文件长度: "<<len<<endl;
 	ofstream out(file_name.c_str(),ofstream::binary);
 	for(int i = 0;i<len;i++){
 		out<<buffer[i];

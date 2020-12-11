@@ -57,12 +57,14 @@ bool ARQ_send(char* pkt,int len,int serial_num,int last=0){
 		}
         real_package[0] = checksum(real_package + 1, len + 2);
         tmp_len = len + 3;
-	}else{
+	}else{//最后一个包
 		
 		real_package = new char[len + 4];
 		real_package[1] = LAST;
 		real_package[2] = serial_num;
+		cout<<"len: "<<len<<endl;
 		real_package[3] = len;
+		cout<<"length: "<<real_package[3]<<endl;
 		for(int i = 4;i<len+4;i++){
 			real_package[i] = pkt[i - 4];
 		}

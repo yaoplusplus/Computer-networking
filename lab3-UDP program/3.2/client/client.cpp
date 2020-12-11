@@ -44,7 +44,7 @@ unsigned char checksum(char *package,int len){
     }
     return ~(sum&0x00FF);
 }
-
+// bool sw_send(char* pkt,int len,int serial_num,int last=0)
 bool ARQ_send(char* pkt,int len,int serial_num,int last=0){
 	if(len > MAXLEN || (last == false && len != MAXLEN)){
 		return false;
@@ -92,13 +92,76 @@ bool ARQ_send(char* pkt,int len,int serial_num,int last=0){
             return true;
 	}
 }
-
-void rev_check(){
-cout<<"\n----------接受ACK线程启动----------\n";
-char rev_ack[4];
-while(recvfrom());
+bool sw_send(){
+	if(sw.slide_w[sw.nextseqnum].length > MAXLEN || (sw.slide_w[sw.nextseqnum].last_flag == false && sw.slide_w[sw.nextseqnum].length != MAXLEN)){
+		return false;
+	}
+	//make package
+	char *real_package;//加入3/4位char:checksum,LAST_FLAG,num(可选)
+	int tmp_len;
+	int serial_num = sw.slide_w[sw.nextseqnum].serial_num;
+	char *pkt =sw.slide_w[sw.nextseqnum].pkt;
+	int len = sw.slide_w[sw.nextseqnum].length;
+	cout<<"包内容的长度: "<<len<<endl;
+	if(!sw.slide_w[sw.nextseqnum].last_flag){
+		real_package = new char[len + 3];
+		real_package[1] = NOTLAST;
+		real_package[2] = serial_num;
+		for (int i = 3; i < len + 3; i++)
+		{
+			real_package[i] = pkt[i - 3];
+		}
+        real_package[0] = checksum(real_package + 1, len + 2);
+        tmp_len = len + 3;
+	}else{//last pkt
+		real_package = new char[len + 4];
+		real_package[1] = LAST;
+		real_package[2] = serial_num;
+		real_package[3] = len;
+		cout<<"real_package[3]: "<<real_package[3]<<endl;
+		for(int i = 4;i<len+4;i++){
+			real_package[i] = pkt[i - 4];
+		}
+		real_package[0] = checksum(real_package + 1 ,len + 3);
+		tmp_len = len + 4;
+	}
+	//send package
+	while(sendto(client, real_package, tmp_len, 0, (sockaddr *) &serverAddr, sizeof(serverAddr))){
+		cout<<"成功发出包的长度:"<<real_package[3]<<endl;		
+		cout<<"成功发出包:"<<real_package[2]<<endl;
+		return true;
+	}
+	// while(true){
+	// 	sendto(client, real_package, tmp_len, 0, (sockaddr *) &serverAddr, sizeof(serverAddr));
+	// 	int begin = clock();
+	// 	char recv[3];
+	// 	int len_tmp = sizeof(serverAddr);
+	// 	int fail = 0;
+		
+	// 	while (recvfrom(client, recv, 3, 0, (sockaddr *) &serverAddr, &len_tmp) == SOCKET_ERROR){    
+	// 		if (clock() - begin > MAX_WAIT_TIME) {
+    //             fail = 1;
+    //             break;
+    //         }
+    //     }
+    //     if (fail == 0 && checksum(recv, 3) == 0 && recv[1] == ACK && recv[2] == (char)serial_num)
+    //         return true;
+	// }
 }
 
+void rev_check(){
+	cout<<"\n----------接受ACK线程启动----------\n";
+	int len_tmp = sizeof(serverAddr);
+	char rev_ack[4];
+	int fail = 0;
+	int begin = clock();
+	while(recvfrom(client, rev_ack, 4, 0, (sockaddr *) &serverAddr, &len_tmp) == SOCKET_ERROR);
+	if(checksum(rev_ack,4)){
+		sw.slide_w[rev_ack[3]].ACK = 1;
+		if(rev_ack[3] == sw.sendbase)
+			sw.sendbase++;
+	}
+}
 
 int main(){
 	WSADATA wsadata;
@@ -173,6 +236,7 @@ int main(){
 			buffer[len++] = t;
 			t = in.get();
 		}
+		cout<<"文件长度: "<<len<<endl;
 		in.close();
 		printf("文件加载完\n");
 		// 发送文件名
@@ -182,7 +246,9 @@ int main(){
 		// 防止序列号溢出unsigne char
 		serial_num %= (1<<8);
 		int num = len / MAXLEN + (len % MAXLEN != 0);
+		cout<<"此次传输的数据包总数: "<<num<<endl;
 		for(int i = 0;i<num;i++){
+			cout<<"当前发送的包:"<<i+1<<endl;
 			int len_package;
 			int last_flag;
 			if(i == num - 1)
@@ -195,11 +261,17 @@ int main(){
 				len_package = MAXLEN;
 			}
 			//裁剪之后的包放入滑动窗口
-			sw.slide_w[serial_num].pkt = buffer + i * MAXLEN;
-			sw.slide_w[serial_num].length = len_package;
-			sw.slide_w[serial_num].last_flag = last_flag;
-
-			ARQ_send(buffer + i * MAXLEN,len_package,serial_num++,last_flag);
+			if(sw.nextseqnum-sw.sendbase<= 9){
+				int num = sw.sendbase;
+				sw.slide_w[num].pkt = buffer + i * MAXLEN;
+				sw.slide_w[num].length = len_package;
+				cout<<"当前包的长度: "<<len_package<<endl;
+				sw.slide_w[num].last_flag = last_flag;
+				sw.slide_w[num].serial_num = serial_num;
+				cout<<"完成发送缓存"<<endl;
+			}
+			// ARQ_send(buffer + i * MAXLEN,len_package,serial_num++,last_flag);
+			sw_send();
 			serial_num %= (1<<8); 
 	}
 	}

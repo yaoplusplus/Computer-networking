@@ -46,6 +46,7 @@ void ARQ_rev(char *pkt,int &len_recv){
 	char recv[MAXLEN + 4];
     int len_tmp = sizeof(clientAddr);
     static char last_order = -1;//上一个包的序号
+    
     len_recv = 0;
     while (true) {
         while (true) {
@@ -74,6 +75,7 @@ void ARQ_rev(char *pkt,int &len_recv){
         last_order = recv[2];
         // 解包
         if (LAST == recv[1]) {
+            cout<<"最后一个包的长度: "<<int(recv[3])<<endl;
             for (int i = 4; i < recv[3] + 4; i++)
                 pkt[len_recv++] = recv[i];
             break;
