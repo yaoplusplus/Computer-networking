@@ -69,7 +69,7 @@ void ARQ_rev(char *pkt,int &len_recv){
             }
         }
         if (last_order == recv[2])
-        // 再次收到了上一个包 再次收包 所以会多次给客户端发一个同一个ack
+        // 再次收到一个包
             continue;
         // 更新服务端收到包序号
         last_order = recv[2];
@@ -140,18 +140,21 @@ int main(){
 	}
     printf("----------成功连接----------\n");
 
-    while(true){
+    
     // 接受文件名
 	int len = 0;
+    memset(buffer,0,sizeof(buffer));
+
 	ARQ_rev(buffer,len);
 	buffer[len] = 0;
 	string file_name(buffer);
-    if(!strcmp("exit",file_name.c_str())){
-        break;
-    }
+    
+    // if(!strcmp("exit",file_name.c_str())){
+    //     break;
+    // }
     printf("收到文件: %s\n",file_name.c_str());
     // 重置buffer
-    memset(buffer,0,file_name.length());
+    memset(buffer,0,sizeof(buffer));
     // 接受文件内容
 	ARQ_rev(buffer,len);
 	ofstream out(file_name.c_str(),ofstream::binary);
@@ -159,9 +162,9 @@ int main(){
 		out<<buffer[i];
 	}
 	out.close();
+    printf("缓冲:%s\n",buffer);
     printf("接收完成: %s\n",file_name.c_str());
     // cout<<"file_name: "<<file_name<<endl;
-    }
 
 	while(true){
 		char recv[2];

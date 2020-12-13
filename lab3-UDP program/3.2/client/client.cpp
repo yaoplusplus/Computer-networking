@@ -1,29 +1,7 @@
 #pragma comment(lib, "Ws2_32.lib")
-
-#include <iostream>
-#include <winsock2.h>
-#include <stdio.h>
-#include <fstream>
-#include <vector>
-#include <time.h>
-#include <thread>
+#include "..\common.h"
 #include "window.h"
-#define WINDOW_LEN 10 //定义窗口长度 最大序号: sendbase+WINDOW_LEN-1
 using namespace std;
-const int MAXLEN = 509;
-char buffer[200000000];
-const unsigned char ACK = 0x01;
-const unsigned char NAK = 0x02;
-const unsigned char LAST = 0x08; //0000 0100
-const unsigned char NOTLAST = 0x18;
-const unsigned char FSHAKE = 0x03;
-const unsigned char SSHAKE = 0x04;
-const unsigned char TSHAKE = 0x05;
-const unsigned char FWAKE = 0x06;
-const unsigned char SWAKE = 0x07;
-const int MAX_WAIT_TIME = 500;
-
-
 SOCKET client;
 
 SOCKADDR_IN serverAddr,clientAddr;
@@ -93,7 +71,9 @@ bool ARQ_send(char* pkt,int len,int serial_num,int last=0){
             return true;
 	}
 }
+static int sendcount = 0;
 bool sw_send(){
+	
 	if(sw.slide_w[sw.nextseqnum].length > MAXLEN || (sw.slide_w[sw.nextseqnum].last_flag == false && sw.slide_w[sw.nextseqnum].length != MAXLEN)){
 		return false;
 	}
@@ -127,21 +107,28 @@ bool sw_send(){
 	//send package
 	while(sendto(client, real_package, tmp_len, 0, (sockaddr *) &serverAddr, sizeof(serverAddr))){
 		sw.nextseqnum++;
+		sendcount++;
 		return true;
 	}
 }
 
 void rev_check(){
-	cout<<"\n----------接受ACK线程启动----------\n";
-	int len_tmp = sizeof(serverAddr);
-	char rev_ack[4];
-	int fail = 0;
-	int begin = clock();
-	while(recvfrom(client, rev_ack, 4, 0, (sockaddr *) &serverAddr, &len_tmp) == SOCKET_ERROR);
-	if(checksum(rev_ack,4)){
-		sw.slide_w[rev_ack[3]].ACK = 1;
-		if(rev_ack[3] == sw.sendbase)
-			sw.sendbase++;
+	while(true){
+		int len_tmp = sizeof(serverAddr);
+		char rev_ack[3];
+		int fail = 0;
+		int begin = clock();
+
+		while(recvfrom(client, rev_ack, 3, 0, (sockaddr *) &serverAddr, &len_tmp) == SOCKET_ERROR);
+		if(checksum(rev_ack,3)){
+			sw.slide_w[rev_ack[2]].ACK = true;
+			int nowacknum = rev_ack[2];
+			if(nowacknum == sw.sendbase){
+				while(sw.slide_w[nowacknum].ACK=true)
+					nowacknum++;
+				}
+				sw.sendbase = nowacknum;
+		}
 	}
 }
 
@@ -168,6 +155,7 @@ int main(){
 		closesocket(client);
     	return 0;
 	}
+	
 	// 建立连接
 	printf("\n----------开始连接----------\n");
 	while(true){
@@ -195,22 +183,21 @@ int main(){
 		}
 	}
 	printf("----------成功连接----------\n\n");
-	// thread rev(rev_check);
+	thread rev(rev_check);
 	// rev.join();
-	while(true){
 		// 输入欲发送文件名
 		string filename;
 		printf("欲发送文件名:"); 
 		cin>>filename;
-		if(!strcmp("exit",filename.c_str())){
-			ARQ_send((char*)filename.c_str(),filename.length(),serial_num++,1);
-			break;}
+		// if(!strcmp("exit",filename.c_str())){
+		// 	ARQ_send((char*)filename.c_str(),filename.length(),serial_num++,1);
+		// 	break;}
 		// 使用二进制方式 打开当前目录下的文件
 		ifstream in(filename.c_str(),ifstream::binary);
 		int len = 0;
 		if(!in){
-			printf("can't open the file!\n请再次输入");
-			continue;
+			printf("can't open the file!\n");
+			return 0;
 		}
 		// 文件读取到buffer
 		BYTE t = in.get();
@@ -221,9 +208,7 @@ int main(){
 		in.close();
 		printf("文件加载完\n");
 		// 发送文件名
-		// ARQ_send((char *) (filename.c_str()),filename.length(),serial_num++,1);
-		if(!ARQ_send((char *) (filename.c_str()),filename.length(),serial_num++,1))
-		printf("文件名发送失败!\n");
+		if(ARQ_send((char *) (filename.c_str()),filename.length(),serial_num++,1))
 		printf("文件名发送完\n");
 		// 发送文件
 		// 防止序列号溢出unsigne char
@@ -231,7 +216,7 @@ int main(){
 		int num = len / MAXLEN + (len % MAXLEN != 0);
 		cout<<"此次传输的数据包总数: "<<num<<endl;
 		for(int i = 0;i<num;i++){
-			cout<<"当前发送的包:"<<i+1<<endl;
+			// cout<<"当前发送的包:"<<i+1<<endl;
 			int len_package;
 			int last_flag;
 			if(i == num - 1)
@@ -245,19 +230,17 @@ int main(){
 			}
 			//裁剪之后的包放入滑动窗口
 			if(sw.nextseqnum-sw.sendbase<= 9){
-				int num = sw.sendbase;
+				int num = sw.nextseqnum;
 				sw.slide_w[num].pkt = buffer + i * MAXLEN;
 				sw.slide_w[num].length = len_package;
 				sw.slide_w[num].last_flag = last_flag;
 				sw.slide_w[num].serial_num = serial_num;
-				cout<<"完成发送缓存"<<endl;
 			}
 			// ARQ_send(buffer + i * MAXLEN,len_package,serial_num++,last_flag);
 			sw_send();
 			serial_num %= (1<<8); 
 	}
-	}
-	
+	cout<<"发送总包数:"<<sendcount<<endl;
 	printf("\n----------断开连接----------");
 	while(true){
 		char tmp[2];

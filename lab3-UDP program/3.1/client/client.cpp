@@ -1,29 +1,9 @@
 #pragma comment(lib, "Ws2_32.lib")
-
-#include <iostream>
-#include <winsock2.h>
-#include <stdio.h>
-#include <fstream>
-#include <vector>
-#include <time.h>
-#include <thread>
-
-using namespace std;
-const int MAXLEN = 509;
-char buffer[200000000];
-const unsigned char ACK = 0x01;
-const unsigned char NAK = 0x02;
-const unsigned char LAST = 0x08; //0000 0100
-const unsigned char NOTLAST = 0x18;
-const unsigned char FSHAKE = 0x03;
-const unsigned char SSHAKE = 0x04;
-const unsigned char TSHAKE = 0x05;
-const unsigned char FWAKE = 0x06;
-const unsigned char SWAKE = 0x07;
-const int MAX_WAIT_TIME = 500;
-
+#include "..\common.h"
+#include "window.h"
 SOCKET client;
 SOCKADDR_IN serverAddr,clientAddr;
+slide_window sw;
 //计算校验和
 unsigned char checksum(char *package,int len){
 	if (len == 0){
@@ -62,9 +42,7 @@ bool ARQ_send(char* pkt,int len,int serial_num,int last=0){
 		real_package = new char[len + 4];
 		real_package[1] = LAST;
 		real_package[2] = serial_num;
-		cout<<"len: "<<len<<endl;
 		real_package[3] = len;
-		cout<<"length: "<<real_package[3]<<endl;
 		for(int i = 4;i<len+4;i++){
 			real_package[i] = pkt[i - 4];
 		}
@@ -89,7 +67,63 @@ bool ARQ_send(char* pkt,int len,int serial_num,int last=0){
             return true;
 	}
 }
+bool sw_send(){
+	
+	if(sw.slide_w[sw.nextseqnum].length > MAXLEN || (sw.slide_w[sw.nextseqnum].last_flag == false && sw.slide_w[sw.nextseqnum].length != MAXLEN)){
+		return false;
+	}
+	//make package
+	char *real_package;//加入3/4位char:checksum,LAST_FLAG,num(可选)
+	int tmp_len;
+	int serial_num = sw.slide_w[sw.nextseqnum].serial_num;
+	char *pkt =sw.slide_w[sw.nextseqnum].pkt;
+	int len = sw.slide_w[sw.nextseqnum].length;
+	if(!sw.slide_w[sw.nextseqnum].last_flag){
+		real_package = new char[len + 3];
+		real_package[1] = NOTLAST;
+		real_package[2] = serial_num;
+		for (int i = 3; i < len + 3; i++)
+		{
+			real_package[i] = pkt[i - 3];
+		}
+        real_package[0] = checksum(real_package + 1, len + 2);
+        tmp_len = len + 3;
+	}else{//last pkt
+		real_package = new char[len + 4];
+		real_package[1] = LAST;
+		real_package[2] = serial_num;
+		real_package[3] = len;
+		for(int i = 4;i<len+4;i++){
+			real_package[i] = pkt[i - 4];
+		}
+		real_package[0] = checksum(real_package + 1 ,len + 3);
+		tmp_len = len + 4;
+	}
+	//send package
+	while(sendto(client, real_package, tmp_len, 0, (sockaddr *) &serverAddr, sizeof(serverAddr))){
+		sw.nextseqnum++;
+		return true;
+	}
+}
+void rev_check(){
+	while(true){
+		int len_tmp = sizeof(serverAddr);
+		char rev_ack[3];
+		int fail = 0;
+		int begin = clock();
 
+		while(recvfrom(client, rev_ack, 3, 0, (sockaddr *) &serverAddr, &len_tmp) == SOCKET_ERROR);
+		if(checksum(rev_ack,3)){
+			sw.slide_w[rev_ack[2]].ACK = true;
+			int nowacknum = rev_ack[2];
+			if(nowacknum == sw.sendbase){
+				while(sw.slide_w[nowacknum].ACK=true)
+					nowacknum++;
+				}
+				sw.sendbase = nowacknum;
+		}
+	}
+}
 int main(){
 	WSADATA wsadata;
 	//package的序号

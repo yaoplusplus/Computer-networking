@@ -1,27 +1,5 @@
 #pragma comment(lib, "Ws2_32.lib")
-
-#include <iostream>
-#include <winsock2.h>
-#include <stdio.h>
-#include <fstream>
-#include <vector>
-#include<time.h>
-#include <thread>
-
-using namespace std;
-const int MAXLEN = 509;
-char buffer[200000000];
-
-const unsigned char ACK = 0x01;
-const unsigned char NAK = 0x02;
-const unsigned char LAST = 0x08;
-const unsigned char NOTLAST = 0x18;
-const unsigned char FSHAKE = 0x03;
-const unsigned char SSHAKE = 0x04;
-const unsigned char TSHAKE = 0x05;
-const unsigned char FWAKE = 0x06;
-const unsigned char SWAKE = 0x07;
-const int MAX_WAIT_TIME = 500;
+#include "..\common.h"
 
 SOCKET server;
 SOCKADDR_IN serverAddr,clientAddr;
@@ -71,10 +49,8 @@ void ARQ_rev(char *pkt,int &len_recv){
             continue;
         last_order = recv[2];
         if (LAST == recv[1]) {
-            cout<<"最后一个包的长度:"<<recv[3]<<endl;
             for (int i = 4; i < recv[3] + 4; i++){
                 pkt[len_recv++] = recv[i];
-                cout<<"i: "<<i<<endl;
                 }
             break;
         } else {
