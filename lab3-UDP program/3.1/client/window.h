@@ -1,18 +1,26 @@
+//滑动窗口定义:
 struct ackwindow{
-char*pkt;//放置发送的包 发包的时候更新这个 不考虑握手和挥手 
+//用于存放缓存
+char*pkt;
 bool ACK;
 bool NAK;
 int length;
-bool last_flag;
 int serial_num;
+//定义发送时间
+int sendtime;
 ackwindow(){
     ACK = false;
     NAK = false;
-    last_flag = false;
 }
+ackwindow(char*pkt,int length,int serial_num){
+    this->pkt = pkt;
+    this->length = length;
+    this->serial_num = serial_num;
+} 
 };
 struct slide_window{
-ackwindow slide_w[1000];
+//窗口大小定义在common.h中 : const int WINDOW_LEN = 1000;
+queue<ackwindow> sw;
 int sendbase;
 int nextseqnum;
 slide_window(){

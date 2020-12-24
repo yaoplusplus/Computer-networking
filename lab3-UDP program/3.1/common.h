@@ -5,9 +5,11 @@
 #include <vector>
 #include <time.h>
 #include <thread>
+#include <queue>
 
 using namespace std;
 const int MAXLEN = 509;
+const int WINDOW_LEN = 1000;
 char buffer[200000000];
 const unsigned char ACK = 0x01;
 const unsigned char NAK = 0x02;

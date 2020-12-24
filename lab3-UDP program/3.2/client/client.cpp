@@ -104,12 +104,20 @@ bool sw_send(){
 		real_package[0] = checksum(real_package + 1 ,len + 3);
 		tmp_len = len + 4;
 	}
-	//send package
+		//send package
+    while(sw.nextseqnum - sw.sendbase >= WINDOW_LEN){
+        //阻塞 等待可用窗格
+    }
 	while(sendto(client, real_package, tmp_len, 0, (sockaddr *) &serverAddr, sizeof(serverAddr))){
+        //缓存发送的pkt
+        ackwindow temp_window(pkt,len,serial_num);
+        temp_window.sendtime = clock();
+        sw.push(temp_window);
+        //向后移动nextseqnum
 		sw.nextseqnum++;
-		sendcount++;
 		return true;
 	}
+}
 }
 
 void rev_check(){

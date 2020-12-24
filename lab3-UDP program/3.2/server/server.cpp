@@ -94,7 +94,7 @@ int main(){
 
     serverAddr.sin_family = AF_INET; //Ê¹ÓÃipv4
     serverAddr.sin_port = htons(5799); //¶Ë¿Ú
-    serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
 
     server = socket(AF_INET, SOCK_DGRAM, 0);
 

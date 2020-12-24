@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "fstream": "cpp",
+        "cstddef": "cpp",
+        "utility": "cpp"
+    }
+}

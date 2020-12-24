@@ -92,28 +92,27 @@ int main(){
 	printf("\n----------等待连接----------\n");
     //开始握手
 	while(true){
-		char recv[2];
+		char revshake[2];
 		int len_tmp = sizeof(clientAddr);
-		while (recvfrom(server, recv, 2, 0, (sockaddr *) &clientAddr, &len_tmp) == SOCKET_ERROR);
-		if(checksum(recv,2)!=0 || recv[1] != FSHAKE){
+		while (recvfrom(server, revshake, 2, 0, (sockaddr *) &clientAddr, &len_tmp) == SOCKET_ERROR);
+		if(checksum(revshake,2)!=0 || revshake[1] != FSHAKE){
 			continue;
 		}
 		while(true){
-			recv[1] = SSHAKE;
-			recv[0] = checksum(recv + 1,1);
-			sendto(server, recv, 2, 0, (sockaddr *) &clientAddr, sizeof(clientAddr));
-            while (recvfrom(server, recv, 2, 0, (sockaddr *) &clientAddr, &len_tmp) == SOCKET_ERROR);
-            if (checksum(recv, 2) == 0 && recv[1] == FSHAKE)
+			revshake[1] = SSHAKE;
+			revshake[0] = checksum(revshake + 1,1);
+			sendto(server, revshake, 2, 0, (sockaddr *) &clientAddr, sizeof(clientAddr));
+            while (recvfrom(server, revshake, 2, 0, (sockaddr *) &clientAddr, &len_tmp) == SOCKET_ERROR);
+            if (checksum(revshake, 2) == 0 && revshake[1] == FSHAKE)
                 continue;
-            if (checksum(recv, 2) == 0 && recv[1] == TSHAKE)
+            if (checksum(revshake, 2) == 0 && revshake[1] == TSHAKE)
                 break;
-            if (checksum(recv, 2) != 0 || recv[1] != TSHAKE) {
+            if (checksum(revshake, 2) != 0 || revshake[1] != TSHAKE) {
                 printf("error");
                 return 0;
             }
 		}
 		break;
-        
 	}
     printf("----------成功连接----------\n");
 
@@ -139,7 +138,14 @@ int main(){
     printf("收到文件: %s\n",file_name.c_str());
     // cout<<"file_name: "<<file_name<<endl;
     }
-
+    char revtimetest[2];
+    int len_tmp = sizeof(clientAddr);
+    if((recvfrom(server, revtimetest, 2, 0, (sockaddr *) &clientAddr, &len_tmp) != SOCKET_ERROR)){
+        cout<<"receive the timetest successfully!\nthe tran time is: "<<
+        clock()-revtimetest[1];
+        cout<<clock()<<endl;
+        cout<<revtimetest[1];
+    }
 	while(true){
 		char recv[2];
         int len_tmp = sizeof(clientAddr);

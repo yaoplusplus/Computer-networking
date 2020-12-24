@@ -1,265 +1,390 @@
+#include <iostream>
+#include <winsock2.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <fstream>
+#include <vector>
+#include <time.h>
+#include <string>
+#include <bitset>
+#include <queue>
+#include <cstdlib>
+#include <ctime>
+
 #pragma comment(lib, "Ws2_32.lib")
-#include "..\common.h"
-#include "window.h"
-SOCKET client;
-SOCKADDR_IN serverAddr,clientAddr;
-slide_window sw;
-//计算校验和
-unsigned char checksum(char *package,int len){
-	if (len == 0){
-		return ~(0);
-	}
+using namespace std;
+
+const int MAXLEN = 509;
+char buffer[100000000];
+const unsigned char ACK = 0x01;
+const unsigned char NAK = 0x02;
+const unsigned char FIRST_SHAKE = 0x03;
+const unsigned char SECOND_SHAKE = 0x04;
+const unsigned char THIRD_SHAKE = 0x05;
+const unsigned char FIRST_WAVE = 0x06;
+const unsigned char SECOND_WAVE = 0x07;
+const unsigned char LAST = 0x08;
+const unsigned char NOTLAST = 0x18;
+const int TIMEOUT = 500;
+double cwnd = MAXLEN;
+int ssthresh=16*MAXLEN;
+int dupACK=0;
+
+SOCKET socketClient;
+SOCKADDR_IN addr_server;
+SOCKADDR_IN addr_client;
+
+unsigned char checksum(char *flag,int len){
     unsigned int sum = 0;
-    int i = 0;
-    while(len--){
-        sum += (unsigned char) package[i++];
-        if(sum & 0xFF00){
-            sum &= 0x00FF;
-            sum++;
-        } 
+    unsigned char ret;
+    int i=0;
+	while (len--)
+	{
+        sum += (unsigned char)(flag[i++]);
     }
-    return ~(sum&0x00FF);
+
+    while (sum >> 8)
+	{
+        sum = (sum >> 8) + (sum & 0x00ff);
+    }
+    ret = sum;
+    return ~ret;
 }
 
-bool ARQ_send(char* pkt,int len,int serial_num,int last=0){
-	if(len > MAXLEN || (last == false && len != MAXLEN)){
+bool send(char* message,int len,int seq,int last=0){
+	if(len > MAXLEN || (last == false && len != MAXLEN))
+	{
 		return false;
 	}
-	char *real_package;//加入3位char:checksum,LAST_FLAG,num 实际发送的包
-	int tmp_len;
-	if(!last){//make package
-		real_package = new char[len + 3];
-		real_package[1] = NOTLAST;
-		real_package[2] = serial_num;
+	char *send_buffer;
+	int send_buffer_len;
+	if(!last)
+	{
+		send_buffer = new char[len + 3];
+		send_buffer[1] = NOTLAST;
+		send_buffer[2] = seq;
 		for (int i = 3; i < len + 3; i++)
 		{
-			real_package[i] = pkt[i - 3];
+			send_buffer[i] = message[i - 3];
 		}
-        real_package[0] = checksum(real_package + 1, len + 2);
-        tmp_len = len + 3;
-	}else{//最后一个包
-		
-		real_package = new char[len + 4];
-		real_package[1] = LAST;
-		real_package[2] = serial_num;
-		real_package[3] = len;
+        send_buffer[0] = checksum(send_buffer + 1, len + 2);
+        send_buffer_len = len + 3;
+	}
+	else
+	{
+		send_buffer = new char[len + 4];
+		send_buffer[1] = LAST;
+		send_buffer[2] = seq;
+		send_buffer[3] = len;
 		for(int i = 4;i<len+4;i++){
-			real_package[i] = pkt[i - 4];
+			send_buffer[i] = message[i - 4];
 		}
-		real_package[0] = checksum(real_package + 1 ,len + 3);
-		tmp_len = len + 4;
+		send_buffer[0] = checksum(send_buffer + 1 ,len + 3);
+		send_buffer_len = len + 4;
 	}
-	//send package
-	while(true){
-		sendto(client, real_package, tmp_len, 0, (sockaddr *) &serverAddr, sizeof(serverAddr));
-		int begin = clock();
-		char recv[3];
-		int len_tmp = sizeof(serverAddr);
-		int fail = 0;
-		
-		while (recvfrom(client, recv, 3, 0, (sockaddr *) &serverAddr, &len_tmp) == SOCKET_ERROR){    
-			if (clock() - begin > MAX_WAIT_TIME) {
-                fail = 1;
-                break;
-            }
-        }
-        if (fail == 0 && checksum(recv, 3) == 0 && recv[1] == ACK && recv[2] == (char)serial_num)
-            return true;
-	}
+	sendto(socketClient, send_buffer, send_buffer_len, 0, (sockaddr *) &addr_server, sizeof(addr_server));
+	return true;
 }
-bool sw_send(){
-	
-	if(sw.slide_w[sw.nextseqnum].length > MAXLEN || (sw.slide_w[sw.nextseqnum].last_flag == false && sw.slide_w[sw.nextseqnum].length != MAXLEN)){
-		return false;
-	}
-	//make package
-	char *real_package;//加入3/4位char:checksum,LAST_FLAG,num(可选)
-	int tmp_len;
-	int serial_num = sw.slide_w[sw.nextseqnum].serial_num;
-	char *pkt =sw.slide_w[sw.nextseqnum].pkt;
-	int len = sw.slide_w[sw.nextseqnum].length;
-	if(!sw.slide_w[sw.nextseqnum].last_flag){
-		real_package = new char[len + 3];
-		real_package[1] = NOTLAST;
-		real_package[2] = serial_num;
-		for (int i = 3; i < len + 3; i++)
-		{
-			real_package[i] = pkt[i - 3];
-		}
-        real_package[0] = checksum(real_package + 1, len + 2);
-        tmp_len = len + 3;
-	}else{//last pkt
-		real_package = new char[len + 4];
-		real_package[1] = LAST;
-		real_package[2] = serial_num;
-		real_package[3] = len;
-		for(int i = 4;i<len+4;i++){
-			real_package[i] = pkt[i - 4];
-		}
-		real_package[0] = checksum(real_package + 1 ,len + 3);
-		tmp_len = len + 4;
-	}
-	//send package
-	while(sendto(client, real_package, tmp_len, 0, (sockaddr *) &serverAddr, sizeof(serverAddr))){
-		sw.nextseqnum++;
-		return true;
-	}
-}
-void rev_check(){
-	while(true){
-		int len_tmp = sizeof(serverAddr);
-		char rev_ack[3];
-		int fail = 0;
-		int begin = clock();
 
-		while(recvfrom(client, rev_ack, 3, 0, (sockaddr *) &serverAddr, &len_tmp) == SOCKET_ERROR);
-		if(checksum(rev_ack,3)){
-			sw.slide_w[rev_ack[2]].ACK = true;
-			int nowacknum = rev_ack[2];
-			if(nowacknum == sw.sendbase){
-				while(sw.slide_w[nowacknum].ACK=true)
-					nowacknum++;
+void send_window(char* message, int len) {
+	queue<pair<int,int>> Window;
+	static int base = 1;	//当前滑动窗最左边的序号，??1开??
+	int seq = base;			//下一个可以进入窗口的包的序号
+	int num = len / MAXLEN + (len % MAXLEN != 0);
+	int temp_windowlast = 0;//窗口最右端
+	int temp_last = 0; 		//已经确定的最后一??
+	bool itw[256] = { 0 };
+	int last_pack = 0;
+	int addr_len = sizeof(addr_client);
+	while (1) {
+		if (temp_last== num)
+			break;
+
+		if (cwnd < ssthresh && dupACK < 3)
+		{
+			if (Window.size() * MAXLEN < cwnd && temp_windowlast < num)
+			{
+				send(message + temp_windowlast * MAXLEN, temp_windowlast == num - 1 ? len % MAXLEN : MAXLEN, seq % 256, temp_windowlast == num - 1);
+				Window.push(make_pair(clock(), seq % 256));
+				itw[seq % 256] = 1;
+				seq++;
+				temp_windowlast++;
+			}
+			char recv[3];
+			int recvsize = recvfrom(socketClient, recv, 3, 0, (sockaddr*)&addr_server, &addr_len);
+			if (recvsize && checksum(recv, 3) == 0 && recv[1] == ACK && itw[(unsigned char)recv[2]]) {
+				while (Window.front().second != (unsigned char)recv[2]) {
+					base++;
+					temp_last++;
+					itw[Window.front().second] = 0;
+					Window.pop();
 				}
-				sw.sendbase = nowacknum;
+				base++;
+				temp_last++;
+				itw[Window.front().second] = 0;
+				Window.pop();
+				cwnd += MAXLEN;
+				dupACK = 0;
+			}
+			else {
+				if (last_pack==(unsigned char)recv[2]) {
+					dupACK++;
+					if (dupACK == 3) {
+						ssthresh = cwnd / 2;
+						cwnd = ssthresh + 3 * MAXLEN;
+						seq = base;
+						temp_windowlast -= Window.size();
+						while (Window.size() != 0)
+							Window.pop();
+						
+					}
+					last_pack = (unsigned char)recv[2];
+				}
+					if (clock() - Window.front().first > TIMEOUT) {
+						seq = base;
+						temp_windowlast -= Window.size();
+						while (Window.size() != 0)
+							Window.pop();
+						ssthresh = cwnd / 2;
+						cwnd = MAXLEN;
+						dupACK = 0;
+					}
+			}
 		}
+		//拥塞避免阶段
+		else if (cwnd >= ssthresh && dupACK<3) {
+			if (Window.size()*MAXLEN < cwnd && temp_windowlast < num) {
+				send(message + temp_windowlast * MAXLEN, temp_windowlast == num - 1 ? len % MAXLEN : MAXLEN, seq % 256, temp_windowlast == num - 1);
+				Window.push(make_pair(clock(), seq % 256));
+				itw[seq % 256] = 1;
+				seq++;
+				temp_windowlast++;
+			}
+			char recv[3];
+			bool recvsec = recvfrom(socketClient, recv, 3, 0, (sockaddr*)&addr_server,&addr_len);
+			if (recvsec && checksum(recv, 3) == 0 && recv[1] == ACK && itw[(unsigned char)recv[2]]) {
+				while (Window.front().second != (unsigned char)recv[2]) {
+					base++;
+					temp_last++;
+					itw[Window.front().second] = 0;
+					Window.pop();
+				}
+				base++;
+				temp_last++;
+				itw[Window.front().second] = 0;
+				Window.pop();
+				cwnd += MAXLEN * (MAXLEN / cwnd);
+				dupACK = 0;
+			}
+			else {
+				if (last_pack==(unsigned char)recv[2]) {
+					dupACK++;
+					if (dupACK == 3) {
+						ssthresh = cwnd / 2;
+						cwnd = ssthresh + 3 * MAXLEN;
+						seq = base;
+						temp_windowlast -= Window.size();
+						while (Window.size() != 0)
+							Window.pop();
+					}
+					last_pack = (unsigned char)recv[2];
+				}
+					
+				if (clock() - Window.front().first > TIMEOUT) {
+					seq = base;
+					temp_windowlast -= Window.size();
+					while (Window.size() != 0)
+						Window.pop();
+					ssthresh = cwnd / 2;
+					cwnd = MAXLEN;
+					dupACK = 0;
+				}
+			}
+	
+			//cout << "congestion avoidance  " << dupACK <<"  "<<cwnd<< endl;
+		}
+		//快速恢复阶??
+		else if (dupACK==3) {
+			
+			if (Window.size() * MAXLEN < cwnd && temp_windowlast < num) {
+				send(message + temp_windowlast * MAXLEN, temp_windowlast == num - 1 ? len % MAXLEN : MAXLEN, seq % 256, temp_windowlast == num - 1);
+				Window.push(make_pair(clock(), seq % 256));
+				itw[seq % 256] = 1;
+				seq++;
+				temp_windowlast++;
+			}
+			char recv[3];
+			bool recvsec = recvfrom(socketClient, recv, 3, 0, (sockaddr*)&addr_server, &addr_len);
+			if (recvsec && checksum(recv, 3) == 0 && recv[1] == ACK && itw[(unsigned char)recv[2]]) {
+				while (Window.front().second != (unsigned char)recv[2]) {
+					base++;
+					temp_last++;
+					itw[Window.front().second] = 0;
+					Window.pop();
+				}
+				base++;
+				temp_last++;
+				itw[Window.front().second] = 0;
+				Window.pop();
+				cwnd = ssthresh;
+				dupACK = 0;
+			}
+			else {
+				if (last_pack == (unsigned char)recv[2]) {
+					cwnd += MAXLEN;
+					last_pack = (unsigned char)recv[2];
+				}
+				if (clock() - Window.front().first > TIMEOUT) {
+					seq = base;
+					temp_windowlast -= Window.size();
+					while (Window.size() != 0)
+						Window.pop();
+					ssthresh = cwnd / 2;
+					cwnd = MAXLEN;
+					dupACK = 0;
+				}
+			}
+			//cout << "quick recovery  " <<dupACK<<"  "<< cwnd<<endl;
+		}
+
 	}
 }
+
 int main(){
-	WSADATA wsadata;
-	//package的序号
-	int serial_num = 0;
-	if(WSAStartup(MAKEWORD(2,2),&wsadata)){
-		printf("版本错误!");
+	
+	WSADATA wsaData;
+	WORD wdRquVersion = MAKEWORD(2,2);
+	int nRes = WSAStartup(wdRquVersion,&wsaData);
+	if(nRes != 0)
+	{
+		int a = WSAGetLastError();
+		printf("网络库打开失败\n", a);
+        system("pause");
+        return 0;
+	}
+
+	if (HIBYTE(wsaData.wVersion) != 2 || LOBYTE(wsaData.wVersion) != 2)
+	{
+		printf("打开的网络库与需求不符\n");
+		WSACleanup();
+		system("pause");
 		return 0;
 	}
 
-    serverAddr.sin_family = AF_INET;
-    serverAddr.sin_port = htons(5799);
-    serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+	socketClient = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (INVALID_SOCKET == socketClient)
+	{
+		int a = WSAGetLastError();
+		printf("网络库打开失败 %d\n", a);
+		WSACleanup();
+		system("pasue");
+		return 0;
+	}
 
-    client = socket(AF_INET, SOCK_DGRAM, 0);
+    addr_server.sin_family = AF_INET;
+    addr_server.sin_port = htons(5799);
+    addr_server.sin_addr.s_addr = inet_addr("127.0.0.1");
 
     int time_out = 1;
-    setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, (char *)&time_out, sizeof(time_out));
-    
-	if(client == INVALID_SOCKET){
-    	printf("socket of client invalid!");
-		closesocket(client);
-    	return 0;
-	}
-	// 建立连接
-	printf("\n----------开始连接----------\n");
-	while(true){
-		//package[0]为检验和
-		char shake_package[2];
-		shake_package[1] = FSHAKE;
-		shake_package[0] = checksum(shake_package + 1,1);
-		sendto(client, shake_package, 2, 0, (sockaddr *) &serverAddr, sizeof(serverAddr));
+    setsockopt(socketClient, SOL_SOCKET, SO_RCVTIMEO, (char *)&time_out, sizeof(time_out));
+	
+	printf("准备连接！\n");
+	while(1)
+	{
+		char shake[2];
+		shake[1] = FIRST_SHAKE;
+		shake[0] = checksum(shake + 1,1);
+		sendto(socketClient, shake, sizeof(shake), 0, (SOCKADDR*) &addr_server, sizeof(addr_server));
+		
 		int begin = clock();
-		char recv[2];
-		int len = sizeof(clientAddr);
-		int fail = 0;
-		while(recvfrom(client, recv, 2, 0, (sockaddr *) &serverAddr, &len) == SOCKET_ERROR){
-			if (clock() - begin > MAX_WAIT_TIME) {
+
+		char shake_recv[2];
+		int  fail = 0;
+		int  len_client_shake = sizeof(addr_client);
+		while(SOCKET_ERROR == recvfrom(socketClient, shake_recv, sizeof(shake_recv), 0, (SOCKADDR*) &addr_server, &len_client_shake))
+		{
+			if (clock() - begin > TIMEOUT)
+			{
                 fail = 1;
                 break;
             }
 		}
-		if(fail == 0 && checksum(recv,2) == 0 && recv[1] == SSHAKE)
+		if(fail == 0 && checksum(shake_recv,2) == 0 && shake_recv[1] == SECOND_SHAKE)
 		{
-			shake_package[1] = TSHAKE;
-			shake_package[0] = checksum(shake_package + 1,1);
-			sendto(client, shake_package, 2, 0, (sockaddr *) &serverAddr, sizeof(serverAddr));
+			shake[1] = THIRD_SHAKE;
+			shake[0] = checksum(shake + 1,1);
+			sendto(socketClient, shake, sizeof(shake), 0, (SOCKADDR*) &addr_server, sizeof(addr_server));
             break;
 		}
 	}
-	printf("----------成功连接----------\n\n");
+	printf("连接成功！\n");
 
-	while(true){
-		// 输入欲发送文件名
+	while(1)
+	{
 		string filename;
-		printf("欲发送文件名:"); 
-		cin>>filename;
-		if(!strcmp("exit",filename.c_str())){
-			ARQ_send((char*)filename.c_str(),filename.length(),serial_num++,1);
-			break;}
-		// 使用二进制方式 打开当前目录下的文件
-		ifstream in(filename.c_str(),ifstream::binary);
 		int len = 0;
-		if(!in){
-			printf("can't open the file!\n请再次输入");
+		printf("请输入待发送的文件"); 
+		cin>>filename;
+		if(!strcmp("exit",filename.c_str()))
+		{
+			send_window((char*)(filename.c_str()), filename.length());
+			break;
+		}
+		ifstream in(filename.c_str(),ifstream::binary);
+		if(!in)
+		{
+			printf("文件不存在，请输入正确的文件名：\n");
 			continue;
 		}
-		// 文件读取到buffer
-		BYTE t = in.get();
-		while(in){
+		else
+		{
+			printf("文件打开成功！\n");
+		}
+		unsigned char t = in.get();
+		while(in)
+		{
 			buffer[len++] = t;
 			t = in.get();
 		}
 		in.close();
-		printf("文件加载完\n");
-		// 发送文件名
-		ARQ_send((char *) (filename.c_str()),filename.length(),serial_num++,1);
-		printf("文件名发送完\n");
-		// 发送文件
-		//TODO what do this mean ?
-		serial_num %= (1<<8);
-		int num = len / MAXLEN + (len % MAXLEN != 0);
-		for(int i = 0;i<num;i++){
-			int len_package;
-			int last_flag;
-			if(i == num - 1)
-			{
-				last_flag = 1;
-				len_package = len - (num - 1)*MAXLEN;
-			}
-			else{
-				last_flag = 0;
-				len_package = MAXLEN;
-			}
-			ARQ_send(buffer + i * MAXLEN,len_package,serial_num++,last_flag);
-			serial_num %= (1<<8); 
+		send_window((char*)(filename.c_str()), filename.length());
+		int begintime = clock();
+		send_window(buffer, len);
+		int endtime = clock();
+		memset(buffer, 0, sizeof(buffer) / sizeof(char));
+		int runtime = (endtime-begintime)*1000/CLOCKS_PER_SEC;
+		printf("文件传输成功??");
+		printf("传输时间为：%d ms\n",runtime);
 	}
-	}
-	
-	printf("\n----------断开连接----------");
-	while(true){
-		char tmp[2];
-		tmp[1] = FWAKE;
-		tmp[0] = checksum(tmp + 1,1);
-		sendto(client, tmp, 2, 0, (sockaddr *) &serverAddr, sizeof(serverAddr));
+
+	while(1)
+	{
+		char wave[2];
+		wave[1] = FIRST_WAVE;
+		wave[0] = checksum(wave + 1,1);
+		sendto(socketClient, wave, sizeof(wave), 0, (SOCKADDR *) &addr_server, sizeof(addr_server));
+
 		int begin = clock();
-		char recv[2];
-		int len = sizeof(clientAddr);
+		char wave_recv[2];
+		int len_client_wave = sizeof(addr_client);
 		int fail = 0;
-		while(recvfrom(client, recv, 2, 0, (sockaddr *) &serverAddr, &len) == SOCKET_ERROR){
-			if (clock() - begin > MAX_WAIT_TIME) {
-                fail = 1;
-                break;
-            }
+		while(SOCKET_ERROR == recvfrom(socketClient, wave_recv, sizeof(wave_recv), 0, (SOCKADDR *) &addr_server, &len_client_wave))
+		{
+			if (clock() - begin > TIMEOUT)
+			{
+            	fail = 1;
+            	break;
+       		}
 		}
-		if(fail == 0 && checksum(recv,2) == 0 && recv[1] == SWAKE)
+		if(fail == 0 && checksum(wave_recv,2) == 0 && wave_recv[1] == SECOND_WAVE)
 		{
             break;
 		}
-	}    
-	closesocket(client);
+	}
+	printf("断开连接！\n");
+
+	closesocket(socketClient);
     WSACleanup();
 	system("pause");
     return 0;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
